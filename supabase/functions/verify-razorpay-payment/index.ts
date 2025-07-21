@@ -37,7 +37,6 @@ serve(async (req) => {
     // Create the body for signature verification exactly as Razorpay documentation specifies
     const body = razorpay_order_id + "|" + razorpay_payment_id
     console.log('Signature verification body:', body)
-    console.log('Razorpay key secret length:', razorpayKeySecret.length)
 
     // Generate expected signature using HMAC-SHA256
     const key = new TextEncoder().encode(razorpayKeySecret)
@@ -66,18 +65,28 @@ serve(async (req) => {
         expected: expectedSignature,
         received: razorpay_signature,
         body: body,
-        keySecretPresent: !!razorpayKeySecret,
         keySecretLength: razorpayKeySecret.length
       })
       
+      // Don't return error immediately in live mode - log for debugging
+      // but still update order status to failed for tracking
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+      await supabase
+        .from('orders')
+        .update({ 
+          status: 'failed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', order_id)
+
       return new Response(
         JSON.stringify({ 
-          error: 'Invalid payment signature',
-          debug: {
-            expected: expectedSignature,
-            received: razorpay_signature,
-            body: body
-          }
+          error: 'Payment signature verification failed',
+          payment_id: razorpay_payment_id,
+          order_id: order_id
         }),
         { 
           status: 400,
@@ -110,7 +119,8 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: 'Failed to update order status',
-          details: error.message 
+          details: error.message,
+          payment_id: razorpay_payment_id
         }),
         { 
           status: 500,

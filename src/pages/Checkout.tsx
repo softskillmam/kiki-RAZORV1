@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { ShoppingCart, CreditCard, ArrowLeft, Loader2, Tag } from 'lucide-react';
+import { ShoppingCart, CreditCard, ArrowLeft, Loader2, Tag, AlertTriangle } from 'lucide-react';
 import { loadRazorpayScript, createRazorpayOrder, initializeRazorpay } from '@/utils/razorpay';
 
 interface CartItem {
@@ -34,6 +34,7 @@ const Checkout = () => {
   const [checkoutData, setCheckoutData] = useState<CheckoutData | null>(null);
   const [loading, setLoading] = useState(true);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const { user, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -164,6 +165,7 @@ const Checkout = () => {
     if (!user || cartItems.length === 0 || !checkoutData) return;
 
     setProcessingPayment(true);
+    setPaymentError(null);
 
     try {
       console.log('Starting Razorpay payment process...');
@@ -245,12 +247,33 @@ const Checkout = () => {
 
             if (verificationError) {
               console.error('Verification API error:', verificationError);
-              throw new Error(`Payment verification failed: ${verificationError.message}`);
+              
+              // Handle verification failure but payment was made
+              setPaymentError(`Payment completed but verification failed. Payment ID: ${response.razorpay_payment_id}. Please contact support with this ID.`);
+              
+              toast({
+                title: "Payment Verification Issue",
+                description: "Your payment was processed but there was a verification issue. Please contact support with your payment ID.",
+                variant: "destructive",
+              });
+              
+              setProcessingPayment(false);
+              return;
             }
 
             if (!verificationResult || !verificationResult.success) {
               console.error('Payment verification failed:', verificationResult);
-              throw new Error(`Payment verification failed: ${verificationResult?.error || 'Unknown error'}`);
+              
+              setPaymentError(`Payment verification failed. Payment ID: ${response.razorpay_payment_id}. Please contact support.`);
+              
+              toast({
+                title: "Payment Verification Failed",
+                description: "Payment verification failed. Please contact support with your payment ID.",
+                variant: "destructive",
+              });
+              
+              setProcessingPayment(false);
+              return;
             }
 
             console.log('Payment verified successfully!');
@@ -291,9 +314,10 @@ const Checkout = () => {
           } catch (error) {
             console.error('Error in payment handler:', error);
             setProcessingPayment(false);
+            setPaymentError(`Payment processing error. Payment ID: ${response.razorpay_payment_id}. Please contact support.`);
             toast({
-              title: "Payment Verification Error",
-              description: error.message || "Payment completed but verification failed. Please contact support with your payment ID.",
+              title: "Payment Processing Error",
+              description: "There was an error processing your payment. Please contact support with your payment ID.",
               variant: "destructive",
             });
           }
@@ -322,6 +346,7 @@ const Checkout = () => {
 
     } catch (error) {
       console.error('Error initializing Razorpay payment:', error);
+      setPaymentError(`Failed to initialize payment: ${error.message}`);
       toast({
         title: "Payment Error",
         description: error.message || "Failed to initialize payment. Please try again.",
@@ -377,6 +402,23 @@ const Checkout = () => {
             </Button>
             <h1 className="text-3xl font-bold">Checkout</h1>
           </div>
+
+          {paymentError && (
+            <Card className="mb-6 border-red-200 bg-red-50">
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5" />
+                  <div>
+                    <h3 className="font-semibold text-red-800">Payment Issue</h3>
+                    <p className="text-red-700 text-sm mt-1">{paymentError}</p>
+                    <p className="text-red-600 text-xs mt-2">
+                      If money was debited from your account, please contact our support team immediately with the payment ID mentioned above.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Order Summary */}
