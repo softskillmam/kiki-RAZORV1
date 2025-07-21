@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { UserCheck, Calendar, BookOpen, RefreshCw, RotateCcw } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { UserCheck, Calendar, BookOpen, RefreshCw, RotateCcw, UserPlus, Trash2, Loader2 } from 'lucide-react';
 import PaymentScreenshotViewer from './PaymentScreenshotViewer';
 import AdminSearchableTab from './AdminSearchableTab';
+import ManualEnrollmentDialog from './ManualEnrollmentDialog';
 
 interface Enrollment {
   id: string;
@@ -56,6 +58,8 @@ const EnrollmentManagement = () => {
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'enrollments' | 'requests'>('requests');
+  const [showManualEnrollmentDialog, setShowManualEnrollmentDialog] = useState(false);
+  const [deletingEnrollmentId, setDeletingEnrollmentId] = useState<string | null>(null);
   const { toast } = useToast();
 
   // MBTI Career Test Course ID
@@ -511,6 +515,43 @@ const EnrollmentManagement = () => {
     }
   };
 
+  const deleteEnrollment = async (enrollmentId: string, studentName: string, courseName: string) => {
+    setDeletingEnrollmentId(enrollmentId);
+    
+    try {
+      const { error } = await supabase
+        .from('enrollments')
+        .delete()
+        .eq('id', enrollmentId);
+
+      if (error) {
+        console.error('Error deleting enrollment:', error);
+        toast({
+          title: "Error",
+          description: "Failed to remove enrollment.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Success",
+        description: `Removed ${studentName} from ${courseName}.`,
+      });
+
+      fetchEnrollments();
+    } catch (error) {
+      console.error('Error in deleteEnrollment:', error);
+      toast({
+        title: "Error",
+        description: "Failed to remove enrollment.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingEnrollmentId(null);
+    }
+  };
+
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
       case 'completed':
@@ -545,237 +586,295 @@ const EnrollmentManagement = () => {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <UserCheck className="h-5 w-5" />
-          Enrollment Management
-        </CardTitle>
-        <CardDescription>
-          Manage student enrollments and approve new requests (MBTI test orders are auto-approved)
-        </CardDescription>
-        <div className="flex gap-2 mt-4">
-          <Button
-            variant={activeTab === 'requests' ? 'default' : 'outline'}
-            onClick={() => setActiveTab('requests')}
-            size="sm"
-          >
-            Pending Requests ({filteredOrders.length})
-          </Button>
-          <Button
-            variant={activeTab === 'enrollments' ? 'default' : 'outline'}
-            onClick={() => setActiveTab('enrollments')}
-            size="sm"
-          >
-            Active Enrollments ({filteredEnrollments.length})
-          </Button>
-          <Button
-            variant="outline"
-            onClick={fetchData}
-            size="sm"
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {activeTab === 'requests' ? (
-          <AdminSearchableTab 
-            onSearch={handleOrderSearch}
-            placeholder="Search by student name, email, or course..."
-          >
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Student</TableHead>
-                    <TableHead>Courses</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Payment Screenshot</TableHead>
-                    <TableHead>Request Date</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredOrders.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">
-                            {order.user_profile?.full_name || 'N/A'}
-                          </div>
-                          <div className="text-sm text-gray-600">
-                            {order.user_profile?.email || 'N/A'}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          {order.order_items.map((item, index) => (
-                            <div key={index} className="text-sm">
-                              {item.course.title}
-                            </div>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">₹{order.total_amount}</div>
-                      </TableCell>
-                      <TableCell>
-                        <PaymentScreenshotViewer orderId={order.id} isAdmin={true} />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1 text-sm">
-                          <Calendar className="w-3 h-3" />
-                          {formatDate(order.created_at)}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            onClick={() => approveEnrollment(order)}
-                            className="bg-green-600 hover:bg-green-700"
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => rejectEnrollment(order.id)}
-                          >
-                            Reject
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {filteredOrders.length === 0 && (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <UserCheck className="h-5 w-5" />
+            Enrollment Management
+          </CardTitle>
+          <CardDescription>
+            Manage student enrollments and approve new requests (MBTI test orders are auto-approved)
+          </CardDescription>
+          <div className="flex gap-2 mt-4">
+            <Button
+              variant={activeTab === 'requests' ? 'default' : 'outline'}
+              onClick={() => setActiveTab('requests')}
+              size="sm"
+            >
+              Pending Requests ({filteredOrders.length})
+            </Button>
+            <Button
+              variant={activeTab === 'enrollments' ? 'default' : 'outline'}
+              onClick={() => setActiveTab('enrollments')}
+              size="sm"
+            >
+              Active Enrollments ({filteredEnrollments.length})
+            </Button>
+            <Button
+              variant="outline"
+              onClick={fetchData}
+              size="sm"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+            {activeTab === 'enrollments' && (
+              <Button
+                onClick={() => setShowManualEnrollmentDialog(true)}
+                size="sm"
+                className="bg-green-600 hover:bg-green-700"
+              >
+                <UserPlus className="h-4 w-4 mr-2" />
+                Add Enrollment
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {activeTab === 'requests' ? (
+            <AdminSearchableTab 
+              onSearch={handleOrderSearch}
+              placeholder="Search by student name, email, or course..."
+            >
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-gray-500 py-8">
-                        No pending enrollment requests found
-                      </TableCell>
+                      <TableHead>Student</TableHead>
+                      <TableHead>Courses</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Payment Screenshot</TableHead>
+                      <TableHead>Request Date</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </AdminSearchableTab>
-        ) : (
-          <AdminSearchableTab 
-            onSearch={handleEnrollmentSearch}
-            placeholder="Search by student name, email, or course..."
-          >
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Student</TableHead>
-                    <TableHead>Course</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Progress</TableHead>
-                    <TableHead>Enrolled Date</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredEnrollments.map((enrollment) => (
-                    <TableRow key={enrollment.id}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">
-                            {enrollment.student?.full_name || 'N/A'}
+                  </TableHeader>
+                  <TableBody>
+                    {filteredOrders.map((order) => (
+                      <TableRow key={order.id}>
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">
+                              {order.user_profile?.full_name || 'N/A'}
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {order.user_profile?.email || 'N/A'}
+                            </div>
                           </div>
-                          <div className="text-sm text-gray-600">
-                            {enrollment.student?.email}
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            {order.order_items.map((item, index) => (
+                              <div key={index} className="text-sm">
+                                {item.course.title}
+                              </div>
+                            ))}
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{enrollment.course?.title}</div>
-                        <div className="text-sm text-gray-600 flex items-center gap-1">
-                          <BookOpen className="w-3 h-3" />
-                          {enrollment.completed_lessons || 0}/{enrollment.course?.total_lessons || 0} lessons
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={getStatusBadgeVariant(enrollment.status)}>
-                          {enrollment.status.charAt(0).toUpperCase() + enrollment.status.slice(1)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <div className="text-sm font-medium">{enrollment.progress || 0}%</div>
-                          <div className="w-16 bg-gray-200 rounded-full h-2">
-                            <div 
-                              className="bg-red-600 h-2 rounded-full" 
-                              style={{ width: `${enrollment.progress || 0}%` }}
-                            ></div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium">₹{order.total_amount}</div>
+                        </TableCell>
+                        <TableCell>
+                          <PaymentScreenshotViewer orderId={order.id} isAdmin={true} />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1 text-sm">
+                            <Calendar className="w-3 h-3" />
+                            {formatDate(order.created_at)}
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1 text-sm">
-                          <Calendar className="w-3 h-3" />
-                          {formatDate(enrollment.enrolled_at)}
-                        </div>
-                        {enrollment.completed_at && (
-                          <div className="text-xs text-green-600">
-                            Completed: {formatDate(enrollment.completed_at)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => approveEnrollment(order)}
+                              className="bg-green-600 hover:bg-green-700"
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => rejectEnrollment(order.id)}
+                            >
+                              Reject
+                            </Button>
                           </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-2">
-                          <Select
-                            value={enrollment.status}
-                            onValueChange={(value) => updateEnrollmentStatus(enrollment.id, value)}
-                            disabled={enrollment.status === 'completed'}
-                          >
-                            <SelectTrigger className="w-32">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="pending">Pending</SelectItem>
-                              <SelectItem value="enrolled">Enrolled</SelectItem>
-                              <SelectItem value="completed">Completed</SelectItem>
-                              <SelectItem value="dropped">Dropped</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => resetProgress(enrollment.id)}
-                            className="w-32 text-xs"
-                            disabled={enrollment.progress === 0}
-                          >
-                            <RotateCcw className="w-3 h-3 mr-1" />
-                            Reset Progress
-                          </Button>
-                          {enrollment.status === 'completed' && (
-                            <div className="text-xs text-gray-500">
-                              Status locked
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {filteredOrders.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-gray-500 py-8">
+                          No pending enrollment requests found
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </AdminSearchableTab>
+          ) : (
+            <AdminSearchableTab 
+              onSearch={handleEnrollmentSearch}
+              placeholder="Search by student name, email, or course..."
+            >
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Student</TableHead>
+                      <TableHead>Course</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Progress</TableHead>
+                      <TableHead>Enrolled Date</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredEnrollments.map((enrollment) => (
+                      <TableRow key={enrollment.id}>
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">
+                              {enrollment.student?.full_name || 'N/A'}
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {enrollment.student?.email}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium">{enrollment.course?.title}</div>
+                          <div className="text-sm text-gray-600 flex items-center gap-1">
+                            <BookOpen className="w-3 h-3" />
+                            {enrollment.completed_lessons || 0}/{enrollment.course?.total_lessons || 0} lessons
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={getStatusBadgeVariant(enrollment.status)}>
+                            {enrollment.status.charAt(0).toUpperCase() + enrollment.status.slice(1)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-medium">{enrollment.progress || 0}%</div>
+                            <div className="w-16 bg-gray-200 rounded-full h-2">
+                              <div 
+                                className="bg-red-600 h-2 rounded-full" 
+                                style={{ width: `${enrollment.progress || 0}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1 text-sm">
+                            <Calendar className="w-3 h-3" />
+                            {formatDate(enrollment.enrolled_at)}
+                          </div>
+                          {enrollment.completed_at && (
+                            <div className="text-xs text-green-600">
+                              Completed: {formatDate(enrollment.completed_at)}
                             </div>
                           )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {filteredEnrollments.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center text-gray-500 py-8">
-                        No enrollments found
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </AdminSearchableTab>
-        )}
-      </CardContent>
-    </Card>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-2">
+                            <Select
+                              value={enrollment.status}
+                              onValueChange={(value) => updateEnrollmentStatus(enrollment.id, value)}
+                              disabled={enrollment.status === 'completed'}
+                            >
+                              <SelectTrigger className="w-32">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="pending">Pending</SelectItem>
+                                <SelectItem value="enrolled">Enrolled</SelectItem>
+                                <SelectItem value="completed">Completed</SelectItem>
+                                <SelectItem value="dropped">Dropped</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => resetProgress(enrollment.id)}
+                                className="flex-1 text-xs"
+                                disabled={enrollment.progress === 0}
+                              >
+                                <RotateCcw className="w-3 h-3 mr-1" />
+                                Reset
+                              </Button>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="px-2"
+                                    disabled={deletingEnrollmentId === enrollment.id}
+                                  >
+                                    {deletingEnrollmentId === enrollment.id ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="w-3 h-3" />
+                                    )}
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Remove Enrollment</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Are you sure you want to remove {enrollment.student?.full_name || enrollment.student?.email} from "{enrollment.course?.title}"? 
+                                      This action cannot be undone and will remove all their progress.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction 
+                                      onClick={() => deleteEnrollment(
+                                        enrollment.id, 
+                                        enrollment.student?.full_name || enrollment.student?.email || 'User',
+                                        enrollment.course?.title || 'Course'
+                                      )}
+                                      className="bg-red-600 hover:bg-red-700"
+                                    >
+                                      Remove Enrollment
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </div>
+                            {enrollment.status === 'completed' && (
+                              <div className="text-xs text-gray-500">
+                                Status locked
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {filteredEnrollments.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-gray-500 py-8">
+                          No enrollments found
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </AdminSearchableTab>
+          )}
+        </CardContent>
+      </Card>
+
+      <ManualEnrollmentDialog 
+        isOpen={showManualEnrollmentDialog}
+        onClose={() => setShowManualEnrollmentDialog(false)}
+        onEnrollmentAdded={fetchEnrollments}
+      />
+    </>
   );
 };
 
