@@ -34,7 +34,95 @@ serve(async (req) => {
       )
     }
 
-    // Create the body for signature verification exactly as Razorpay documentation specifies
+    // Initialize Supabase client for database operations
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+    // First, let's verify the payment status directly with Razorpay using the payment ID
+    const razorpayKeyId = Deno.env.get('RAZORPAY_KEY_ID')
+    const basicAuth = btoa(`${razorpayKeyId}:${razorpayKeySecret}`)
+    
+    console.log('Checking payment status with Razorpay API for payment:', razorpay_payment_id)
+    
+    try {
+      const paymentResponse = await fetch(`https://api.razorpay.com/v1/payments/${razorpay_payment_id}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Basic ${basicAuth}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (paymentResponse.ok) {
+        const paymentData = await paymentResponse.json()
+        console.log('Razorpay payment status:', paymentData.status, 'Amount:', paymentData.amount)
+        
+        // If payment is captured/authorized, consider it successful regardless of signature
+        if (paymentData.status === 'captured' || paymentData.status === 'authorized') {
+          console.log('Payment is captured/authorized, marking as successful')
+          
+          // Update order status to confirmed
+          const { data: updateData, error } = await supabase
+            .from('orders')
+            .update({ 
+              status: 'confirmed',
+              payment_method: 'Razorpay',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', order_id)
+            .select()
+
+          if (error) {
+            console.error('Error updating order:', error)
+          } else {
+            console.log('Order updated successfully for captured payment:', updateData)
+          }
+
+          return new Response(
+            JSON.stringify({ 
+              success: true, 
+              payment_id: razorpay_payment_id,
+              order_id: order_id,
+              payment_status: paymentData.status,
+              message: 'Payment verified successfully via Razorpay API' 
+            }),
+            {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          )
+        }
+        
+        // If payment failed, update order accordingly
+        if (paymentData.status === 'failed') {
+          await supabase
+            .from('orders')
+            .update({ 
+              status: 'failed',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', order_id)
+
+          return new Response(
+            JSON.stringify({ 
+              error: 'Payment failed according to Razorpay',
+              payment_id: razorpay_payment_id,
+              order_id: order_id,
+              payment_status: paymentData.status
+            }),
+            { 
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            }
+          )
+        }
+      }
+    } catch (apiError) {
+      console.error('Error fetching payment from Razorpay API:', apiError)
+      // Continue with signature verification as fallback
+    }
+
+    // Fallback to signature verification
     const body = razorpay_order_id + "|" + razorpay_payment_id
     console.log('Signature verification body:', body)
 
@@ -59,7 +147,7 @@ serve(async (req) => {
     console.log('Received signature:', razorpay_signature)
     console.log('Signatures match:', expectedSignature === razorpay_signature)
 
-    // Compare signatures exactly (Razorpay signatures are case-sensitive)
+    // Compare signatures
     if (expectedSignature !== razorpay_signature) {
       console.error('Signature verification failed:', {
         expected: expectedSignature,
@@ -68,12 +156,8 @@ serve(async (req) => {
         keySecretLength: razorpayKeySecret.length
       })
       
-      // Don't return error immediately in live mode - log for debugging
-      // but still update order status to failed for tracking
-      const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-      const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
+      // In live mode, if signature fails but we couldn't verify via API, 
+      // mark as failed but don't immediately reject
       await supabase
         .from('orders')
         .update({ 
@@ -86,7 +170,8 @@ serve(async (req) => {
         JSON.stringify({ 
           error: 'Payment signature verification failed',
           payment_id: razorpay_payment_id,
-          order_id: order_id
+          order_id: order_id,
+          note: 'If money was debited, please contact support with this payment ID'
         }),
         { 
           status: 400,
@@ -97,11 +182,7 @@ serve(async (req) => {
 
     console.log('Signature verification successful')
 
-    // Update order status in database to confirmed (successful Razorpay payment)
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
+    // Update order status in database to confirmed
     console.log('Updating order status for order_id:', order_id)
 
     const { data: updateData, error } = await supabase

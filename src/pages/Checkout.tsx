@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -230,9 +229,9 @@ const Checkout = () => {
         order_id: razorpayOrder.order_id,
         handler: async (response: any) => {
           try {
-            console.log('Payment completed, verifying...', response);
+            console.log('Payment response received:', response);
             
-            // Verify payment
+            // Always try to verify payment even if Razorpay shows success
             const { data: verificationResult, error: verificationError } = await supabase.functions.invoke('verify-razorpay-payment', {
               body: {
                 razorpay_order_id: response.razorpay_order_id,
@@ -245,79 +244,68 @@ const Checkout = () => {
             console.log('Verification result:', verificationResult);
             console.log('Verification error:', verificationError);
 
-            if (verificationError) {
-              console.error('Verification API error:', verificationError);
-              
-              // Handle verification failure but payment was made
-              setPaymentError(`Payment completed but verification failed. Payment ID: ${response.razorpay_payment_id}. Please contact support with this ID.`);
-              
-              toast({
-                title: "Payment Verification Issue",
-                description: "Your payment was processed but there was a verification issue. Please contact support with your payment ID.",
-                variant: "destructive",
-              });
-              
-              setProcessingPayment(false);
-              return;
-            }
+            // Handle verification success
+            if (verificationResult && verificationResult.success) {
+              console.log('Payment verified successfully!');
 
-            if (!verificationResult || !verificationResult.success) {
-              console.error('Payment verification failed:', verificationResult);
-              
-              setPaymentError(`Payment verification failed. Payment ID: ${response.razorpay_payment_id}. Please contact support.`);
-              
-              toast({
-                title: "Payment Verification Failed",
-                description: "Payment verification failed. Please contact support with your payment ID.",
-                variant: "destructive",
-              });
-              
-              setProcessingPayment(false);
-              return;
-            }
-
-            console.log('Payment verified successfully!');
-
-            // Payment verified successfully - create enrollments automatically
-            for (const item of cartItems) {
-              try {
-                await createEnrollment(item.course.id);
-              } catch (enrollmentError) {
-                console.error(`Error creating enrollment for course ${item.course.id}:`, enrollmentError);
-                // Don't throw here, as payment was successful
+              // Create enrollments automatically
+              for (const item of cartItems) {
+                try {
+                  await createEnrollment(item.course.id);
+                } catch (enrollmentError) {
+                  console.error(`Error creating enrollment for course ${item.course.id}:`, enrollmentError);
+                }
               }
+
+              // Clear cart
+              await supabase
+                .from('cart_items')
+                .delete()
+                .eq('user_id', user.id);
+
+              // Clear checkout data from sessionStorage
+              sessionStorage.removeItem('checkoutData');
+
+              toast({
+                title: "Payment Successful!",
+                description: "You have been enrolled in your courses and can access them immediately.",
+              });
+
+              // Navigate based on cart contents
+              const hasMBTITest = cartItems.some(item => item.course.id === MBTI_COURSE_ID);
+              if (hasMBTITest) {
+                navigate('/career-test');
+              } else {
+                navigate('/enrolled-courses');
+              }
+              
+              setProcessingPayment(false);
+              return;
             }
 
-            // Clear cart
-            await supabase
-              .from('cart_items')
-              .delete()
-              .eq('user_id', user.id);
-
-            // Clear checkout data from sessionStorage
-            sessionStorage.removeItem('checkoutData');
-
-            toast({
-              title: "Payment Successful!",
-              description: "You have been enrolled in your courses and can access them immediately.",
-            });
-
-            // Check if MBTI test is in the cart to determine redirect
-            const hasMBTITest = cartItems.some(item => item.course.id === MBTI_COURSE_ID);
+            // Handle verification failure
+            console.error('Payment verification failed or returned error');
             
-            if (hasMBTITest) {
-              navigate('/career-test');
-            } else {
-              navigate('/enrolled-courses');
-            }
+            // Show specific error message for failed verification
+            const errorMsg = verificationResult?.error || verificationError?.message || 'Payment verification failed';
+            
+            setPaymentError(`Payment verification failed: ${errorMsg}. Payment ID: ${response.razorpay_payment_id}. Please contact our support team immediately with this payment ID if money was debited from your account.`);
+            
+            toast({
+              title: "Payment Verification Failed",
+              description: `Verification failed. If money was debited, please contact support immediately with Payment ID: ${response.razorpay_payment_id}`,
+              variant: "destructive",
+            });
+            
+            setProcessingPayment(false);
 
           } catch (error) {
             console.error('Error in payment handler:', error);
             setProcessingPayment(false);
-            setPaymentError(`Payment processing error. Payment ID: ${response.razorpay_payment_id}. Please contact support.`);
+            setPaymentError(`Payment processing error. Payment ID: ${response.razorpay_payment_id}. If money was debited, please contact support immediately with this payment ID.`);
             toast({
               title: "Payment Processing Error",
-              description: "There was an error processing your payment. Please contact support with your payment ID.",
+              description: `Processing error. If money was debited, contact support with Payment ID: ${response.razorpay_payment_id}`,
               variant: "destructive",
             });
           }
