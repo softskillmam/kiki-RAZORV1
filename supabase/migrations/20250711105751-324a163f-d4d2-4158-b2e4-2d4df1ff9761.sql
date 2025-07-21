@@ -1,0 +1,45 @@
+
+-- Insert MBTI Personality Test as a proper course with a specific ID for consistency
+INSERT INTO public.courses (
+  id,
+  title,
+  description,
+  image_url,
+  price,
+  original_price,
+  category,
+  duration,
+  total_lessons,
+  age_range,
+  mode,
+  status,
+  created_at,
+  updated_at
+) VALUES (
+  'mbti-personality-test-2025',
+  'MBTI Personality Test',
+  'Discover your personality type and find the perfect career path with our comprehensive MBTI assessment. Get detailed insights into your strengths, preferences, and ideal career matches.',
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500&h=300&fit=crop',
+  500,
+  500,
+  'Assessment',
+  '30 minutes',
+  1,
+  '16+ years',
+  'Online',
+  'active',
+  NOW(),
+  NOW()
+) ON CONFLICT (id) DO UPDATE SET
+  title = EXCLUDED.title,
+  description = EXCLUDED.description,
+  image_url = EXCLUDED.image_url,
+  price = EXCLUDED.price,
+  original_price = EXCLUDED.original_price,
+  category = EXCLUDED.category,
+  duration = EXCLUDED.duration,
+  total_lessons = EXCLUDED.total_lessons,
+  age_range = EXCLUDED.age_range,
+  mode = EXCLUDED.mode,
+  status = EXCLUDED.status,
+  updated_at = NOW();
