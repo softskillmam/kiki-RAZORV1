@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { ShoppingCart, CreditCard, ArrowLeft, Loader2, Tag, AlertTriangle } from 'lucide-react';
 import { loadRazorpayScript, createRazorpayOrder, initializeRazorpay } from '@/utils/razorpay';
 
@@ -33,6 +34,7 @@ const Checkout = () => {
   const [checkoutData, setCheckoutData] = useState<CheckoutData | null>(null);
   const [loading, setLoading] = useState(true);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [initializingPayment, setInitializingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const { user, isAuthenticated } = useAuth();
   const { toast } = useToast();
@@ -163,13 +165,14 @@ const Checkout = () => {
   const handleRazorpayPayment = async () => {
     if (!user || cartItems.length === 0 || !checkoutData) return;
 
+    setInitializingPayment(true);
     setProcessingPayment(true);
     setPaymentError(null);
 
     try {
       console.log('Starting Razorpay payment process...');
       
-      // Load Razorpay script
+      // Load Razorpay script with visual feedback
       const scriptLoaded = await loadRazorpayScript();
       if (!scriptLoaded) {
         throw new Error('Failed to load Razorpay script');
@@ -218,6 +221,9 @@ const Checkout = () => {
       console.log('Creating Razorpay order...');
       const razorpayOrder = await createRazorpayOrder(checkoutData.total);
       console.log('Razorpay order created:', razorpayOrder);
+
+      // Hide initialization loading but keep processing state
+      setInitializingPayment(false);
 
       // Initialize Razorpay payment
       const options = {
@@ -320,6 +326,7 @@ const Checkout = () => {
         modal: {
           ondismiss: () => {
             setProcessingPayment(false);
+            setInitializingPayment(false);
             toast({
               title: "Payment Cancelled",
               description: "Your payment was cancelled. Please try again when you're ready.",
@@ -341,6 +348,7 @@ const Checkout = () => {
         variant: "destructive",
       });
       setProcessingPayment(false);
+      setInitializingPayment(false);
     }
   };
 
@@ -349,8 +357,44 @@ const Checkout = () => {
   if (loading) {
     return (
       <div className="min-h-screen">
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-kiki-purple-600" />
+        <div className="container mx-auto px-4 py-8">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-center gap-4 mb-6">
+              <Skeleton className="h-10 w-32" />
+              <Skeleton className="h-8 w-40" />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <Card>
+                <CardHeader>
+                  <Skeleton className="h-6 w-40" />
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="flex items-center gap-4 p-4 border rounded-lg">
+                        <Skeleton className="w-16 h-16 rounded-lg" />
+                        <div className="flex-1 space-y-2">
+                          <Skeleton className="h-4 w-full" />
+                          <Skeleton className="h-4 w-20" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <Skeleton className="h-6 w-48" />
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <Skeleton className="h-20 w-full" />
+                    <Skeleton className="h-12 w-full" />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -513,13 +557,40 @@ const Checkout = () => {
                     </div>
                   </div>
 
+                  {initializingPayment && (
+                    <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <div className="w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin"></div>
+                        </div>
+                        <div>
+                          <h4 className="font-medium text-purple-900">Initializing Payment Gateway</h4>
+                          <p className="text-sm text-purple-700 mt-1">
+                            Setting up secure payment... This may take a few seconds
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        <Skeleton className="h-2 w-full bg-purple-200" />
+                        <Skeleton className="h-2 w-3/4 bg-purple-200" />
+                      </div>
+                    </div>
+                  )}
+
                   <Button 
                     onClick={handleRazorpayPayment}
                     className="w-full" 
                     disabled={processingPayment}
                     size="lg"
                   >
-                    {processingPayment ? (
+                    {initializingPayment ? (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          Initializing Payment Gateway...
+                        </div>
+                      </>
+                    ) : processingPayment ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         Processing Payment...
